@@ -104,18 +104,19 @@ python CO2_property_table.py --t-min 300 --t-max 900 --t-count 500 --p-min 10000
 | `co2_cp.csv` | 定压比热，J/(kg K) |
 | `co2_conductivity.csv` | 导热率，W/(m K) |
 
-每个 CSV 都采用二维矩阵格式：第一列为压力，第一行为温度。结构如下：
+每个 CSV 都采用二维矩阵格式：第一列为压力，第一行为温度。脚本内部仍使用 Pa 调用 CoolProp，输出 CSV 的第一列压力换算为 MPa。结构如下：
 
 ```text
-P/T,220.0,220.5,221.0,...
-50000.0,value,value,value,...
-150000.0,value,value,value,...
+P(MPa)/T(K),220.0,220.5,221.0,...
+0.05,value,value,value,...
+0.15,value,value,value,...
 ```
 
 默认网格与 `create_CO2_properties.jl` 保持一致：
 
 - 温度：220-1500 K，步长 0.5 K
-- 压力：50000-40000000 Pa，步长 100000 Pa
+- 计算压力：50000-40000000 Pa，步长 100000 Pa
+- CSV 输出压力：0.05-39.95 MPa，步长 0.1 MPa
 - 流体：CO2
 
 这些默认值集中写在 `CO2_property_2Dtable.py` 顶部：

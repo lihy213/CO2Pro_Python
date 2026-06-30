@@ -1,10 +1,12 @@
 """Generate Fluent-friendly 2D CO2 property tables with CoolProp.
 
 This script rewrites create_CO2_properties.jl in Python.  It creates one CSV
-file per property.  Each CSV uses pressure as rows and temperature as columns:
+file per property.  Each CSV uses pressure as rows and temperature as columns.
+CoolProp calculations use Pa internally, while the output pressure column is
+written in MPa for easier Fluent/UDF table use:
 
-    P/T, 220.0, 220.5, ...
-    50000.0, rho(P,T1), rho(P,T2), ...
+    P(MPa)/T(K), 220.0, 220.5, ...
+    0.05, rho(P,T1), rho(P,T2), ...
 
 The default ranges match the Julia script:
     T = 220.0:0.5:1500.0 K
@@ -110,9 +112,9 @@ def calc_row(args: tuple[int, float, list[float], str]) -> tuple[int, float, dic
 def write_property_table(path: Path, temperatures: list[float], rows: list[tuple[float, list[float]]]) -> None:
     with path.open("w", newline="", encoding="utf-8") as csv_file:
         writer = csv.writer(csv_file)
-        writer.writerow(["P/T", *[str(temperature) for temperature in temperatures]])
+        writer.writerow(["P(MPa)/T(K)", *[str(temperature) for temperature in temperatures]])
         for pressure, values in rows:
-            writer.writerow([pressure, *values])
+            writer.writerow([pressure / 1.0e6, *values])
 
 
 def write_error_log(path: Path, errors: list[str]) -> None:
@@ -137,7 +139,11 @@ def generate_tables(config: TableConfig) -> None:
 
     print(f"Fluid: {config.fluid}")
     print(f"Temperature grid: {len(temperatures)} points, {temperatures[0]}-{temperatures[-1]} K")
-    print(f"Pressure grid: {len(pressures)} points, {pressures[0]}-{pressures[-1]} Pa")
+    print(
+        f"Pressure grid: {len(pressures)} points, "
+        f"{pressures[0]}-{pressures[-1]} Pa "
+        f"({pressures[0] / 1.0e6}-{pressures[-1] / 1.0e6} MPa in CSV)"
+    )
     print(f"Total states: {total_points}")
     print(f"Workers: {config.workers}")
 
