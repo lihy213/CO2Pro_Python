@@ -6,14 +6,16 @@
 
 - `CO2_property_table.py`：长表格式，来自 `CO2_STARCCM2.jl` 的 Python 改写版本。
 - `CO2_property_2Dtable.py`：二维矩阵格式，来自 `create_CO2_properties.jl` 的 Python 改写版本，适合 Fluent UDF 插值表。
+- `validate_CO2_2Dtable.py`：二维表验证脚本，对比 CSV 双线性插值结果与 CoolProp 直接查询结果，并输出误差统计和图。
 
 ## 依赖
 
 ```powershell
 pip install CoolProp
+pip install matplotlib
 ```
 
-脚本只依赖 Python 标准库和 CoolProp，不强制依赖 pandas 或 numpy。
+生成脚本只依赖 Python 标准库和 CoolProp，不强制依赖 pandas 或 numpy。验证脚本需要 `matplotlib` 用于输出图片。
 
 ## 长表脚本：CO2_property_table.py
 
@@ -185,6 +187,53 @@ python CO2_property_2Dtable.py --t-min 220 --t-max 230 --t-step 1 --p-min 50000 
 ```
 
 这个脚本使用 Python `ProcessPoolExecutor` 并行计算。每个任务负责一个压力行下的全部温度点，输出时会按压力从小到大排序，便于 Fluent UDF 读取。无论使用 `uniform` 还是 `critical` 模式，输出 CSV 都保持同样的二维表结构，只是温度列和压力行可以变为非均匀间隔。
+
+## 二维表验证脚本：validate_CO2_2Dtable.py
+
+`validate_CO2_2Dtable.py` 用于验证二维 CSV 物性表的插值精度。它会随机抽取温压点，对比：
+
+```text
+CoolProp 直接查询值 vs CSV 双线性插值值
+```
+
+默认会读取当前文件夹下的 4 个表：
+
+- `co2_density.csv`
+- `co2_viscosity.csv`
+- `co2_cp.csv`
+- `co2_conductivity.csv`
+
+在表格所在文件夹中运行：
+
+```powershell
+python validate_CO2_2Dtable.py
+```
+
+指定表格目录、输出目录和采样点数：
+
+```powershell
+python validate_CO2_2Dtable.py --table-dir fluent_tables --output-dir validation_results --samples 1000 --critical-samples 300
+```
+
+在 PyCharm 中，也可以把下面内容填到 Parameters：
+
+```powershell
+--table-dir fluent_tables --output-dir validation_results --samples 1000 --critical-samples 300
+```
+
+输出文件包括：
+
+| 文件 | 内容 |
+|---|---|
+| `validation_point_errors.csv` | 每个随机点的 CoolProp 值、表格插值值、绝对误差、相对误差 |
+| `validation_error_summary.csv` | 每种物性的平均误差、95% 分位误差、最大误差 |
+| `validation_report.md` | Markdown 验证报告 |
+| `relative_error_boxplot.png` | 四种物性的相对误差箱线图 |
+| `relative_error_vs_temperature.png` | 相对误差随温度变化 |
+| `relative_error_vs_pressure.png` | 相对误差随压力变化 |
+| `critical_region_profile.png` | 临界区附近 CoolProp 与表格插值曲线对比 |
+
+CSV 表第一列压力按 MPa 读取，CoolProp 查询时会自动换算为 Pa。温度单位为 K。
 
 ## 给 STAR-CCM+ 或 Fluent 使用时的提醒
 
