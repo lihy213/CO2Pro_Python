@@ -131,13 +131,6 @@ DEFAULT_P_MAX = 40_000_000.0
 DEFAULT_P_STEP = 100_000.0
 DEFAULT_WORKERS = max(1, (os.cpu_count() or 2) - 1)
 DEFAULT_GRID_MODE = "uniform"
-DEFAULT_ULTRA_CRITICAL_REFINEMENT = True
-DEFAULT_ULTRA_CRITICAL_T_MIN = 303.9
-DEFAULT_ULTRA_CRITICAL_T_MAX = 304.35
-DEFAULT_ULTRA_CRITICAL_T_STEP = 0.005
-DEFAULT_ULTRA_CRITICAL_P_MIN = 7.32e6
-DEFAULT_ULTRA_CRITICAL_P_MAX = 7.43e6
-DEFAULT_ULTRA_CRITICAL_P_STEP = 1_000.0
 ```
 
 直接运行：
@@ -162,18 +155,6 @@ python CO2_property_2Dtable.py --grid-mode critical
 
 ```powershell
 python CO2_property_2Dtable.py --grid-mode critical --critical-t-min 300 --critical-t-max 310 --critical-t-step 0.05 --critical-p-min 7000000 --critical-p-max 8000000 --critical-p-step 10000
-```
-
-对于 Cp 和导热率这类临界尖峰很窄的物性，普通临界区加密仍可能不够。脚本默认还会在 CO2 临界点附近启用一层嵌套超细加密：
-
-```powershell
-python CO2_property_2Dtable.py --grid-mode critical --ultra-critical-refinement true --ultra-critical-t-min 303.9 --ultra-critical-t-max 304.35 --ultra-critical-t-step 0.005 --ultra-critical-p-min 7320000 --ultra-critical-p-max 7430000 --ultra-critical-p-step 1000
-```
-
-如果只想使用普通临界区加密，可以关闭：
-
-```powershell
-python CO2_property_2Dtable.py --grid-mode critical --ultra-critical-refinement false
 ```
 
 如果只想覆盖较小范围并加密临界区，可以这样测试：
@@ -272,7 +253,6 @@ python validate_CO2_2Dtable.py --table-dir fluent_tables --output-dir validation
 | `relative_error_vs_temperature.png` | 相对误差随温度变化 |
 | `relative_error_vs_pressure.png` | 相对误差随压力变化 |
 | `critical_region_profile.png` | 临界区附近 CoolProp 与表格插值曲线对比 |
-| `critical_region_profile_values.csv` | 临界区剖面曲线对应的 CoolProp 值、插值值和相对误差 |
 
 CSV 表第一列压力按 MPa 读取，CoolProp 查询时会自动换算为 Pa。温度单位为 K。
 

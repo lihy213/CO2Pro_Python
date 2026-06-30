@@ -53,13 +53,6 @@ DEFAULT_CRITICAL_T_STEP = 0.05
 DEFAULT_CRITICAL_P_MIN = 7.0e6
 DEFAULT_CRITICAL_P_MAX = 8.0e6
 DEFAULT_CRITICAL_P_STEP = 10_000.0
-DEFAULT_ULTRA_CRITICAL_REFINEMENT = True
-DEFAULT_ULTRA_CRITICAL_T_MIN = 303.9
-DEFAULT_ULTRA_CRITICAL_T_MAX = 304.35
-DEFAULT_ULTRA_CRITICAL_T_STEP = 0.005
-DEFAULT_ULTRA_CRITICAL_P_MIN = 7.32e6
-DEFAULT_ULTRA_CRITICAL_P_MAX = 7.43e6
-DEFAULT_ULTRA_CRITICAL_P_STEP = 1_000.0
 
 
 PROPERTY_FILES = {
@@ -87,13 +80,6 @@ class TableConfig:
     critical_p_min: float
     critical_p_max: float
     critical_p_step: float
-    ultra_critical_refinement: bool
-    ultra_critical_t_min: float
-    ultra_critical_t_max: float
-    ultra_critical_t_step: float
-    ultra_critical_p_min: float
-    ultra_critical_p_max: float
-    ultra_critical_p_step: float
     output_dir: Path
     workers: int
     error_log: Path
@@ -165,18 +151,6 @@ def build_axis_grid(
     return merge_grids(base_grid, refined_grid)
 
 
-def add_optional_refinement(
-    grid: list[float],
-    start: float,
-    stop: float,
-    step: float,
-    global_min: float,
-    global_max: float,
-) -> list[float]:
-    refined_grid = clipped_stepped_range(start, stop, step, global_min, global_max)
-    return merge_grids(grid, refined_grid)
-
-
 def calc_row(args: tuple[int, float, list[float], str]) -> tuple[int, float, dict[str, list[float]], list[str]]:
     row_index, pressure, temperatures, fluid = args
     row_data = {name: [] for name in PROPERTY_FILES}
@@ -242,23 +216,6 @@ def generate_tables(config: TableConfig) -> None:
         config.critical_p_max,
         config.critical_p_step,
     )
-    if config.grid_mode == "critical" and config.ultra_critical_refinement:
-        temperatures = add_optional_refinement(
-            temperatures,
-            config.ultra_critical_t_min,
-            config.ultra_critical_t_max,
-            config.ultra_critical_t_step,
-            config.t_min,
-            config.t_max,
-        )
-        pressures = add_optional_refinement(
-            pressures,
-            config.ultra_critical_p_min,
-            config.ultra_critical_p_max,
-            config.ultra_critical_p_step,
-            config.p_min,
-            config.p_max,
-        )
     total_rows = len(pressures)
     total_points = len(temperatures) * len(pressures)
 
@@ -285,14 +242,6 @@ def generate_tables(config: TableConfig) -> None:
             f"P={config.critical_p_min}-{config.critical_p_max} Pa "
             f"step {config.critical_p_step} Pa"
         )
-        if config.ultra_critical_refinement:
-            print(
-                "Ultra-critical refinement: "
-                f"T={config.ultra_critical_t_min}-{config.ultra_critical_t_max} K "
-                f"step {config.ultra_critical_t_step} K; "
-                f"P={config.ultra_critical_p_min}-{config.ultra_critical_p_max} Pa "
-                f"step {config.ultra_critical_p_step} Pa"
-            )
 
     tasks = [
         (row_index, pressure, temperatures, config.fluid)
@@ -353,15 +302,6 @@ def positive_int(value: str) -> int:
     return parsed
 
 
-def str_to_bool(value: str) -> bool:
-    normalized = value.strip().lower()
-    if normalized in {"1", "true", "yes", "y", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "n", "off"}:
-        return False
-    raise argparse.ArgumentTypeError("value must be true or false")
-
-
 def parse_args() -> TableConfig:
     parser = argparse.ArgumentParser(
         description="Generate Fluent-friendly 2D CO2 property CSV tables with CoolProp."
@@ -415,48 +355,6 @@ def parse_args() -> TableConfig:
         default=DEFAULT_CRITICAL_P_STEP,
         help="Critical-region pressure step, Pa",
     )
-    parser.add_argument(
-        "--ultra-critical-refinement",
-        type=str_to_bool,
-        default=DEFAULT_ULTRA_CRITICAL_REFINEMENT,
-        help="Enable a nested ultra-fine grid around the CO2 critical point",
-    )
-    parser.add_argument(
-        "--ultra-critical-t-min",
-        type=float,
-        default=DEFAULT_ULTRA_CRITICAL_T_MIN,
-        help="Ultra-critical minimum temperature, K",
-    )
-    parser.add_argument(
-        "--ultra-critical-t-max",
-        type=float,
-        default=DEFAULT_ULTRA_CRITICAL_T_MAX,
-        help="Ultra-critical maximum temperature, K",
-    )
-    parser.add_argument(
-        "--ultra-critical-t-step",
-        type=positive_float,
-        default=DEFAULT_ULTRA_CRITICAL_T_STEP,
-        help="Ultra-critical temperature step, K",
-    )
-    parser.add_argument(
-        "--ultra-critical-p-min",
-        type=float,
-        default=DEFAULT_ULTRA_CRITICAL_P_MIN,
-        help="Ultra-critical minimum pressure, Pa",
-    )
-    parser.add_argument(
-        "--ultra-critical-p-max",
-        type=float,
-        default=DEFAULT_ULTRA_CRITICAL_P_MAX,
-        help="Ultra-critical maximum pressure, Pa",
-    )
-    parser.add_argument(
-        "--ultra-critical-p-step",
-        type=positive_float,
-        default=DEFAULT_ULTRA_CRITICAL_P_STEP,
-        help="Ultra-critical pressure step, Pa",
-    )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Directory for output CSV files")
     parser.add_argument(
         "--workers",
@@ -487,13 +385,6 @@ def parse_args() -> TableConfig:
         critical_p_min=args.critical_p_min,
         critical_p_max=args.critical_p_max,
         critical_p_step=args.critical_p_step,
-        ultra_critical_refinement=args.ultra_critical_refinement,
-        ultra_critical_t_min=args.ultra_critical_t_min,
-        ultra_critical_t_max=args.ultra_critical_t_max,
-        ultra_critical_t_step=args.ultra_critical_t_step,
-        ultra_critical_p_min=args.ultra_critical_p_min,
-        ultra_critical_p_max=args.ultra_critical_p_max,
-        ultra_critical_p_step=args.ultra_critical_p_step,
         output_dir=args.output_dir,
         workers=args.workers,
         error_log=args.error_log,
