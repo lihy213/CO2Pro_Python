@@ -436,6 +436,12 @@ def validate_tables(
         for property_name in PROPERTY_CONFIG
     }
     phase_table = load_phase_table(config.table_dir)
+    if config.interpolation_method == "phase-aware" and phase_table is None:
+        raise FileNotFoundError(
+            "phase-aware interpolation requires co2_phase.csv in the table directory. "
+            "Please regenerate the property tables with the latest CO2_property_2Dtable.py, "
+            "or use --interpolation-method bilinear to validate old tables."
+        )
     points = build_validation_points(config, tables)
     rows: list[dict[str, float | str]] = []
     sample_points: list[dict[str, float | str]] = []
