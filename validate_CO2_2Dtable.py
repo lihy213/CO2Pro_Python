@@ -630,12 +630,31 @@ def plot_error_vs_pressure(output_dir: Path, rows: list[dict[str, float | str]])
     plt.close(fig)
 
 
+def interpolate_by_config(
+    config: ValidationConfig,
+    table: PropertyTable,
+    phase_table: PhaseTable | None,
+    pressure_pa: float,
+    temperature_k: float,
+) -> float:
+    if config.interpolation_method == "phase-aware":
+        return phase_aware_interpolate(
+            table,
+            phase_table,
+            pressure_pa,
+            temperature_k,
+            config.fluid,
+        )
+    return bilinear_interpolate(table, pressure_pa, temperature_k)
+
+
 def plot_critical_profile(config: ValidationConfig, output_dir: Path) -> None:
     plt = require_matplotlib()
     tables = {
         property_name: load_property_table(config.table_dir, property_name)
         for property_name in PROPERTY_CONFIG
     }
+    phase_table = load_phase_table(config.table_dir)
     t_min, t_max, p_min, p_max = table_domain(tables)
     temperature_start = max(config.critical_t_min, t_min)
     temperature_stop = min(config.critical_t_max, t_max)
@@ -650,6 +669,7 @@ def plot_critical_profile(config: ValidationConfig, output_dir: Path) -> None:
     ]
 
     fig, axes = plt.subplots(2, 2, figsize=(10, 7), sharex=True)
+    profile_rows: list[dict[str, float | str]] = []
     for ax, property_name in zip(axes.ravel(), PROPERTY_CONFIG.keys()):
         table = tables[property_name]
         key = PROPERTY_CONFIG[property_name]["coolprop_key"]
@@ -658,10 +678,28 @@ def plot_critical_profile(config: ValidationConfig, output_dir: Path) -> None:
 
         for temperature in temperatures:
             try:
-                cp_values.append(PropsSI(key, "T", temperature, "P", pressure_pa, config.fluid))
+                coolprop_value = PropsSI(key, "T", temperature, "P", pressure_pa, config.fluid)
             except Exception:
-                cp_values.append(math.nan)
-            interp_values.append(bilinear_interpolate(table, pressure_pa, temperature))
+                coolprop_value = math.nan
+            interpolated_value = interpolate_by_config(
+                config,
+                table,
+                phase_table,
+                pressure_pa,
+                temperature,
+            )
+            cp_values.append(coolprop_value)
+            interp_values.append(interpolated_value)
+            profile_rows.append(
+                {
+                    "property": property_name,
+                    "temperature_K": temperature,
+                    "pressure_MPa": pressure_pa / 1.0e6,
+                    "coolprop_value": coolprop_value,
+                    "csv_interpolated_value": interpolated_value,
+                    "relative_error": relative_error(interpolated_value, coolprop_value),
+                }
+            )
 
         ax.plot(temperatures, cp_values, label="CoolProp", linewidth=1.5)
         ax.plot(temperatures, interp_values, label="CSV interpolation", linestyle="--", linewidth=1.2)
@@ -677,6 +715,7 @@ def plot_critical_profile(config: ValidationConfig, output_dir: Path) -> None:
     fig.tight_layout()
     fig.savefig(output_dir / "critical_region_profile.png", dpi=300)
     plt.close(fig)
+    write_dict_csv(output_dir / "critical_region_profile_values.csv", profile_rows)
 
 
 def write_report(config: ValidationConfig, summaries: list[dict[str, float | str]], output_dir: Path) -> None:
