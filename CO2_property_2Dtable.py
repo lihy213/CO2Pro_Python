@@ -31,7 +31,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
-from CoolProp.CoolProp import PropsSI
+from CoolProp.CoolProp import PhaseSI, PropsSI
 
 
 # Default settings for direct execution in PyCharm.
@@ -60,6 +60,7 @@ PROPERTY_FILES = {
     "viscosity": "co2_viscosity.csv",
     "cp": "co2_cp.csv",
     "conductivity": "co2_conductivity.csv",
+    "phase": "co2_phase.csv",
 }
 
 
@@ -95,14 +96,22 @@ def stepped_range(start: float, stop: float, step: float) -> list[float]:
     tolerance = abs(step) * 1.0e-9
 
     while current <= stop + tolerance:
-        values.append(round(current, 12))
+        values.append(round(current, 10))
         current += step
 
     return values
 
 
 def merge_grids(base_grid: list[float], refined_grid: list[float]) -> list[float]:
-    return sorted({round(value, 12) for value in [*base_grid, *refined_grid]})
+    values = sorted(round(value, 10) for value in [*base_grid, *refined_grid])
+    merged: list[float] = []
+    tolerance = 1.0e-9
+
+    for value in values:
+        if not merged or abs(value - merged[-1]) > tolerance:
+            merged.append(value)
+
+    return merged
 
 
 def clipped_stepped_range(
@@ -149,12 +158,14 @@ def calc_row(args: tuple[int, float, list[float], str]) -> tuple[int, float, dic
 
     for temperature in temperatures:
         try:
+            phase = PhaseSI("T", temperature, "P", pressure, fluid)
             density = PropsSI("D", "T", temperature, "P", pressure, fluid)
             viscosity = PropsSI("V", "T", temperature, "P", pressure, fluid)
             cp = PropsSI("C", "T", temperature, "P", pressure, fluid)
             conductivity = PropsSI("L", "T", temperature, "P", pressure, fluid)
         except Exception as exc:  # CoolProp raises backend-specific exceptions.
             errors.append(f"Error at P={pressure} Pa, T={temperature} K: {exc}")
+            phase = "invalid"
             density = math.nan
             viscosity = math.nan
             cp = math.nan
@@ -164,6 +175,7 @@ def calc_row(args: tuple[int, float, list[float], str]) -> tuple[int, float, dic
         row_data["viscosity"].append(viscosity)
         row_data["cp"].append(cp)
         row_data["conductivity"].append(conductivity)
+        row_data["phase"].append(phase)
 
     return row_index, pressure, row_data, errors
 

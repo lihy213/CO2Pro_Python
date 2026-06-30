@@ -105,6 +105,7 @@ python CO2_property_table.py --t-min 300 --t-max 900 --t-count 500 --p-min 10000
 | `co2_viscosity.csv` | 动力黏度，Pa s |
 | `co2_cp.csv` | 定压比热，J/(kg K) |
 | `co2_conductivity.csv` | 导热率，W/(m K) |
+| `co2_phase.csv` | CoolProp 相态标签，用于识别气相、液相、超临界区和跨相插值风险 |
 
 每个 CSV 都采用二维矩阵格式：第一列为压力，第一行为温度。脚本内部仍使用 Pa 调用 CoolProp，输出 CSV 的第一列压力换算为 MPa。结构如下：
 
@@ -188,13 +189,17 @@ python CO2_property_2Dtable.py --t-min 220 --t-max 230 --t-step 1 --p-min 50000 
 
 这个脚本使用 Python `ProcessPoolExecutor` 并行计算。每个任务负责一个压力行下的全部温度点，输出时会按压力从小到大排序，便于 Fluent UDF 读取。无论使用 `uniform` 还是 `critical` 模式，输出 CSV 都保持同样的二维表结构，只是温度列和压力行可以变为非均匀间隔。
 
+生成脚本会对基础网格和临界区加密网格进行容差去重，避免 `310.0` 与 `310.000000000002` 这类浮点累加造成的重复列。
+
 ## 二维表验证脚本：validate_CO2_2Dtable.py
 
 `validate_CO2_2Dtable.py` 用于验证二维 CSV 物性表的插值精度。它会随机抽取温压点，对比：
 
 ```text
-CoolProp 直接查询值 vs CSV 双线性插值值
+CoolProp 直接查询值 vs CSV 插值值
 ```
+
+默认插值方法为 `phase-aware`。如果插值单元四个角点相态一致，则使用普通双线性插值；如果四个角点跨越气液相边界，则根据目标点相态，只使用同相角点做反距离加权插值，避免把液相角点混入气相点，或把气相角点混入液相点。
 
 默认会读取当前文件夹下的 4 个表：
 
@@ -202,6 +207,7 @@ CoolProp 直接查询值 vs CSV 双线性插值值
 - `co2_viscosity.csv`
 - `co2_cp.csv`
 - `co2_conductivity.csv`
+- `co2_phase.csv`
 
 在表格所在文件夹中运行：
 
@@ -213,6 +219,18 @@ python validate_CO2_2Dtable.py
 
 ```powershell
 python validate_CO2_2Dtable.py --table-dir fluent_tables --output-dir validation_results --samples 1000 --critical-samples 300
+```
+
+复现旧版普通双线性插值结果：
+
+```powershell
+python validate_CO2_2Dtable.py --table-dir fluent_tables --output-dir validation_bilinear --interpolation-method bilinear
+```
+
+使用相态感知插值：
+
+```powershell
+python validate_CO2_2Dtable.py --table-dir fluent_tables --output-dir validation_phase_aware --interpolation-method phase-aware
 ```
 
 在 PyCharm 中，也可以把下面内容填到 Parameters：
@@ -227,7 +245,7 @@ python validate_CO2_2Dtable.py --table-dir fluent_tables --output-dir validation
 |---|---|
 | `validation_sample_points.csv` | 验证过程中抽取的温度、压力组合，含 sample_id、区域标签、K、Pa、MPa |
 | `coolprop_property_samples.csv` | 每个抽样点的 CoolProp 直接查询物性宽表 |
-| `csv_interpolated_property_samples.csv` | 每个抽样点由 CSV 双线性插值得到的物性宽表 |
+| `csv_interpolated_property_samples.csv` | 每个抽样点由 CSV 插值得到的物性宽表 |
 | `validation_point_errors.csv` | 每个随机点的 CoolProp 值、表格插值值、绝对误差、相对误差 |
 | `validation_error_summary.csv` | 每种物性的平均误差、95% 分位误差、最大误差 |
 | `validation_report.md` | Markdown 验证报告 |

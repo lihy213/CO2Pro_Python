@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from CoolProp.CoolProp import PropsSI
+from CoolProp.CoolProp import PhaseSI, PropsSI
 
 
 DEFAULT_TABLE_DIR = Path(".")
@@ -34,6 +34,7 @@ DEFAULT_CRITICAL_T_MIN = 300.0
 DEFAULT_CRITICAL_T_MAX = 310.0
 DEFAULT_CRITICAL_P_MIN = 7.0e6
 DEFAULT_CRITICAL_P_MAX = 8.0e6
+DEFAULT_INTERPOLATION_METHOD = "phase-aware"
 
 
 PROPERTY_CONFIG = {
@@ -69,6 +70,13 @@ class PropertyTable:
 
 
 @dataclass(frozen=True)
+class PhaseTable:
+    temperatures: list[float]
+    pressures_mpa: list[float]
+    phases: list[list[str]]
+
+
+@dataclass(frozen=True)
 class ValidationConfig:
     table_dir: Path
     output_dir: Path
@@ -80,6 +88,7 @@ class ValidationConfig:
     critical_t_max: float
     critical_p_min: float
     critical_p_max: float
+    interpolation_method: str
 
 
 def parse_float(value: str) -> float:
@@ -122,6 +131,31 @@ def load_property_table(table_dir: Path, property_name: str) -> PropertyTable:
     )
 
 
+def load_phase_table(table_dir: Path) -> PhaseTable | None:
+    path = table_dir / "co2_phase.csv"
+    if not path.exists():
+        return None
+
+    with path.open("r", newline="", encoding="utf-8") as csv_file:
+        reader = csv.reader(csv_file)
+        header = next(reader)
+        temperatures = [float(item) for item in header[1:]]
+        pressures_mpa: list[float] = []
+        phases: list[list[str]] = []
+
+        for row in reader:
+            if not row:
+                continue
+            pressures_mpa.append(float(row[0]))
+            phases.append([item.strip() for item in row[1:]])
+
+    return PhaseTable(
+        temperatures=temperatures,
+        pressures_mpa=pressures_mpa,
+        phases=phases,
+    )
+
+
 def find_bracket(axis: list[float], value: float) -> tuple[int, int]:
     if value < axis[0] or value > axis[-1]:
         raise ValueError(f"value {value} is outside axis range {axis[0]}-{axis[-1]}")
@@ -135,6 +169,60 @@ def find_bracket(axis: list[float], value: float) -> tuple[int, int]:
     if lower == upper:
         upper += 1
     return lower, upper
+
+
+def phase_family(phase: str) -> str:
+    normalized = phase.strip().lower()
+    if normalized in {"gas", "supercritical_gas"}:
+        return "gas"
+    if normalized in {"liquid", "supercritical_liquid"}:
+        return "liquid"
+    if normalized in {"supercritical", "critical_point"}:
+        return "supercritical"
+    if normalized in {"twophase", "two_phase"}:
+        return "two_phase"
+    return normalized
+
+
+def corner_phases(
+    phase_table: PhaseTable | None,
+    pi0: int,
+    pi1: int,
+    ti0: int,
+    ti1: int,
+) -> tuple[str, str, str, str] | None:
+    if phase_table is None:
+        return None
+    return (
+        phase_table.phases[pi0][ti0],
+        phase_table.phases[pi0][ti1],
+        phase_table.phases[pi1][ti0],
+        phase_table.phases[pi1][ti1],
+    )
+
+
+def inverse_distance_interpolate(
+    candidates: list[tuple[float, float, float]],
+    pressure_mpa: float,
+    temperature_k: float,
+) -> float:
+    weighted_sum = 0.0
+    weight_total = 0.0
+    scale_p = max(max(abs(p - pressure_mpa) for p, _, _ in candidates), 1.0e-12)
+    scale_t = max(max(abs(t - temperature_k) for _, t, _ in candidates), 1.0e-12)
+
+    for p_corner, t_corner, value in candidates:
+        distance = math.hypot(
+            (p_corner - pressure_mpa) / scale_p,
+            (t_corner - temperature_k) / scale_t,
+        )
+        if distance <= 1.0e-14:
+            return value
+        weight = 1.0 / (distance * distance)
+        weighted_sum += weight * value
+        weight_total += weight
+
+    return weighted_sum / weight_total if weight_total else math.nan
 
 
 def bilinear_interpolate(table: PropertyTable, pressure_pa: float, temperature_k: float) -> float:
@@ -164,6 +252,60 @@ def bilinear_interpolate(table: PropertyTable, pressure_pa: float, temperature_k
         + wp * (1.0 - wt) * q10
         + wp * wt * q11
     )
+
+
+def phase_aware_interpolate(
+    table: PropertyTable,
+    phase_table: PhaseTable | None,
+    pressure_pa: float,
+    temperature_k: float,
+    fluid: str,
+) -> float:
+    if phase_table is None:
+        return bilinear_interpolate(table, pressure_pa, temperature_k)
+
+    pressure_mpa = pressure_pa / 1.0e6
+    pi0, pi1 = find_bracket(table.pressures_mpa, pressure_mpa)
+    ti0, ti1 = find_bracket(table.temperatures, temperature_k)
+
+    values = (
+        table.values[pi0][ti0],
+        table.values[pi0][ti1],
+        table.values[pi1][ti0],
+        table.values[pi1][ti1],
+    )
+    if any(math.isnan(value) for value in values):
+        return math.nan
+
+    phases = corner_phases(phase_table, pi0, pi1, ti0, ti1)
+    if phases is None:
+        return bilinear_interpolate(table, pressure_pa, temperature_k)
+
+    corner_families = [phase_family(phase) for phase in phases]
+    try:
+        target_family = phase_family(PhaseSI("T", temperature_k, "P", pressure_pa, fluid))
+    except Exception:
+        return bilinear_interpolate(table, pressure_pa, temperature_k)
+
+    if len(set(corner_families)) == 1 or target_family == "supercritical":
+        return bilinear_interpolate(table, pressure_pa, temperature_k)
+
+    corners = [
+        (table.pressures_mpa[pi0], table.temperatures[ti0], values[0], corner_families[0]),
+        (table.pressures_mpa[pi0], table.temperatures[ti1], values[1], corner_families[1]),
+        (table.pressures_mpa[pi1], table.temperatures[ti0], values[2], corner_families[2]),
+        (table.pressures_mpa[pi1], table.temperatures[ti1], values[3], corner_families[3]),
+    ]
+    same_phase = [
+        (p_corner, t_corner, value)
+        for p_corner, t_corner, value, family in corners
+        if family == target_family
+    ]
+
+    if same_phase:
+        return inverse_distance_interpolate(same_phase, pressure_mpa, temperature_k)
+
+    return bilinear_interpolate(table, pressure_pa, temperature_k)
 
 
 def table_domain(tables: dict[str, PropertyTable]) -> tuple[float, float, float, float]:
@@ -293,6 +435,7 @@ def validate_tables(
         property_name: load_property_table(config.table_dir, property_name)
         for property_name in PROPERTY_CONFIG
     }
+    phase_table = load_phase_table(config.table_dir)
     points = build_validation_points(config, tables)
     rows: list[dict[str, float | str]] = []
     sample_points: list[dict[str, float | str]] = []
@@ -334,7 +477,16 @@ def validate_tables(
                 interpolated_row[property_name] = math.nan
                 continue
 
-            interpolated = bilinear_interpolate(table, pressure_pa, temperature_k)
+            if config.interpolation_method == "phase-aware":
+                interpolated = phase_aware_interpolate(
+                    table,
+                    phase_table,
+                    pressure_pa,
+                    temperature_k,
+                    config.fluid,
+                )
+            else:
+                interpolated = bilinear_interpolate(table, pressure_pa, temperature_k)
             coolprop_row[property_name] = reference
             interpolated_row[property_name] = interpolated
             if math.isnan(interpolated):
@@ -529,6 +681,7 @@ def write_report(config: ValidationConfig, summaries: list[dict[str, float | str
         f"- Fluid: `{config.fluid}`",
         f"- Global random samples: `{config.samples}`",
         f"- Critical-region random samples: `{config.critical_samples}`",
+        f"- Interpolation method: `{config.interpolation_method}`",
         f"- Critical region: `{config.critical_t_min}-{config.critical_t_max} K`, "
         f"`{config.critical_p_min / 1.0e6}-{config.critical_p_max / 1.0e6} MPa`",
         "",
@@ -616,6 +769,12 @@ def parse_args() -> ValidationConfig:
     parser.add_argument("--critical-t-max", type=float, default=DEFAULT_CRITICAL_T_MAX, help="Critical maximum T, K")
     parser.add_argument("--critical-p-min", type=float, default=DEFAULT_CRITICAL_P_MIN, help="Critical minimum P, Pa")
     parser.add_argument("--critical-p-max", type=float, default=DEFAULT_CRITICAL_P_MAX, help="Critical maximum P, Pa")
+    parser.add_argument(
+        "--interpolation-method",
+        choices=("bilinear", "phase-aware"),
+        default=DEFAULT_INTERPOLATION_METHOD,
+        help="CSV interpolation method used for validation",
+    )
 
     args = parser.parse_args()
     if args.critical_samples < 0:
@@ -632,6 +791,7 @@ def parse_args() -> ValidationConfig:
         critical_t_max=args.critical_t_max,
         critical_p_min=args.critical_p_min,
         critical_p_max=args.critical_p_max,
+        interpolation_method=args.interpolation_method,
     )
 
 
