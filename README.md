@@ -199,9 +199,7 @@ python CO2_property_2Dtable.py --t-min 220 --t-max 230 --t-step 1 --p-min 50000 
 CoolProp 直接查询值 vs CSV 插值值
 ```
 
-默认插值方法为 `bilinear`，用于反映普通二维连续表格插值在 Fluent/UDF 中的真实使用误差。`co2_phase.csv` 不再用于默认修正插值结果，而是用于误差来源分类，识别抽样点是否位于普通单相区、跨相插值单元、近饱和线或近临界峰区域。
-
-`phase-aware` 仍保留为探索性诊断模式。如果插值单元四个角点跨越气液相边界，它会根据目标点相态只使用同相角点做反距离加权插值。但该方法可能引入不连续和阶梯状曲线，不建议作为正式物性表插值方法。
+默认插值方法为 `phase-aware`。如果插值单元四个角点相态一致，则使用普通双线性插值；如果四个角点跨越气液相边界，则根据目标点相态，只使用同相角点做反距离加权插值，避免把液相角点混入气相点，或把气相角点混入液相点。
 
 默认会读取当前文件夹下的 4 个表：
 
@@ -250,7 +248,6 @@ python validate_CO2_2Dtable.py --table-dir fluent_tables --output-dir validation
 | `csv_interpolated_property_samples.csv` | 每个抽样点由 CSV 插值得到的物性宽表 |
 | `validation_point_errors.csv` | 每个随机点的 CoolProp 值、表格插值值、绝对误差、相对误差 |
 | `validation_error_summary.csv` | 每种物性的平均误差、95% 分位误差、最大误差 |
-| `validation_error_source_summary.csv` | 按误差来源分类统计误差，例如普通单相、跨相单元、近临界峰 |
 | `validation_report.md` | Markdown 验证报告 |
 | `relative_error_boxplot.png` | 四种物性的相对误差箱线图 |
 | `relative_error_vs_temperature.png` | 相对误差随温度变化 |

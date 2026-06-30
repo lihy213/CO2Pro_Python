@@ -34,10 +34,7 @@ DEFAULT_CRITICAL_T_MIN = 300.0
 DEFAULT_CRITICAL_T_MAX = 310.0
 DEFAULT_CRITICAL_P_MIN = 7.0e6
 DEFAULT_CRITICAL_P_MAX = 8.0e6
-DEFAULT_INTERPOLATION_METHOD = "bilinear"
-DEFAULT_NEAR_CRITICAL_T_WINDOW = 1.0
-DEFAULT_NEAR_CRITICAL_P_WINDOW = 0.5e6
-DEFAULT_NEAR_SATURATION_REL_P = 0.005
+DEFAULT_INTERPOLATION_METHOD = "phase-aware"
 
 
 PROPERTY_CONFIG = {
@@ -92,9 +89,6 @@ class ValidationConfig:
     critical_p_min: float
     critical_p_max: float
     interpolation_method: str
-    near_critical_t_window: float
-    near_critical_p_window: float
-    near_saturation_rel_p: float
 
 
 def parse_float(value: str) -> float:
@@ -205,76 +199,6 @@ def corner_phases(
         phase_table.phases[pi1][ti0],
         phase_table.phases[pi1][ti1],
     )
-
-
-def interpolation_cell_phase_families(
-    table: PropertyTable,
-    phase_table: PhaseTable | None,
-    pressure_pa: float,
-    temperature_k: float,
-) -> list[str]:
-    if phase_table is None:
-        return []
-
-    pressure_mpa = pressure_pa / 1.0e6
-    pi0, pi1 = find_bracket(table.pressures_mpa, pressure_mpa)
-    ti0, ti1 = find_bracket(table.temperatures, temperature_k)
-    phases = corner_phases(phase_table, pi0, pi1, ti0, ti1)
-    if phases is None:
-        return []
-    return [phase_family(phase) for phase in phases]
-
-
-def classify_sample(
-    config: ValidationConfig,
-    table: PropertyTable,
-    phase_table: PhaseTable | None,
-    pressure_pa: float,
-    temperature_k: float,
-) -> tuple[str, str, str]:
-    try:
-        target_phase = PhaseSI("T", temperature_k, "P", pressure_pa, config.fluid)
-    except Exception:
-        return "coolprop_phase_error", "unknown", ""
-
-    target_family = phase_family(target_phase)
-    corner_families = interpolation_cell_phase_families(table, phase_table, pressure_pa, temperature_k)
-    corner_family_text = ";".join(corner_families)
-    unique_corner_families = set(corner_families)
-    crosses_phase_cell = len(unique_corner_families) > 1
-
-    try:
-        t_critical = PropsSI("Tcrit", config.fluid)
-        p_critical = PropsSI("Pcrit", config.fluid)
-    except Exception:
-        t_critical = 304.1282
-        p_critical = 7.377298373e6
-
-    near_critical = (
-        abs(temperature_k - t_critical) <= config.near_critical_t_window
-        and abs(pressure_pa - p_critical) <= config.near_critical_p_window
-    )
-
-    near_saturation = False
-    if temperature_k < t_critical:
-        try:
-            p_saturation = PropsSI("P", "T", temperature_k, "Q", 0, config.fluid)
-            near_saturation = abs(pressure_pa - p_saturation) / p_saturation <= config.near_saturation_rel_p
-        except Exception:
-            near_saturation = False
-
-    if crosses_phase_cell:
-        category = "cross_phase_cell"
-    elif near_critical:
-        category = "near_critical_peak"
-    elif near_saturation:
-        category = "near_saturation_boundary"
-    elif target_family in {"gas", "liquid", "supercritical"}:
-        category = "single_phase_smooth"
-    else:
-        category = f"other_{target_family}"
-
-    return category, target_phase, corner_family_text
 
 
 def inverse_distance_interpolate(
@@ -498,37 +422,6 @@ def summarize_errors(rows: list[dict[str, float | str]]) -> list[dict[str, float
     return summaries
 
 
-def summarize_errors_by_category(rows: list[dict[str, float | str]]) -> list[dict[str, float | str]]:
-    summaries: list[dict[str, float | str]] = []
-    properties = sorted({str(row["property"]) for row in rows})
-    categories = sorted({str(row["error_source_category"]) for row in rows})
-
-    for property_name in properties:
-        property_rows = [row for row in rows if row["property"] == property_name]
-        for category in categories:
-            category_rows = [row for row in property_rows if row["error_source_category"] == category]
-            rel_errors = [
-                float(row["relative_error"])
-                for row in category_rows
-                if not math.isnan(float(row["relative_error"]))
-            ]
-            if not rel_errors:
-                continue
-            summaries.append(
-                {
-                    "property": property_name,
-                    "error_source_category": category,
-                    "valid_points": len(rel_errors),
-                    "mean_relative_error": statistics.fmean(rel_errors),
-                    "median_relative_error": statistics.median(rel_errors),
-                    "p95_relative_error": percentile(rel_errors, 0.95),
-                    "max_relative_error": max(rel_errors),
-                }
-            )
-
-    return summaries
-
-
 def validate_tables(
     config: ValidationConfig,
 ) -> tuple[
@@ -543,8 +436,6 @@ def validate_tables(
         for property_name in PROPERTY_CONFIG
     }
     phase_table = load_phase_table(config.table_dir)
-    if phase_table is None:
-        print("Warning: co2_phase.csv was not found. Error-source classification will be limited.")
     if config.interpolation_method == "phase-aware" and phase_table is None:
         raise FileNotFoundError(
             "phase-aware interpolation requires co2_phase.csv in the table directory. "
@@ -560,20 +451,10 @@ def validate_tables(
     nan_interpolations = 0
 
     for sample_id, (temperature_k, pressure_pa, region) in enumerate(points, start=1):
-        category, target_phase, corner_families = classify_sample(
-            config,
-            next(iter(tables.values())),
-            phase_table,
-            pressure_pa,
-            temperature_k,
-        )
         sample_points.append(
             {
                 "sample_id": sample_id,
                 "region": region,
-                "error_source_category": category,
-                "coolprop_phase": target_phase,
-                "cell_corner_phase_families": corner_families,
                 "temperature_K": temperature_k,
                 "pressure_Pa": pressure_pa,
                 "pressure_MPa": pressure_pa / 1.0e6,
@@ -582,16 +463,12 @@ def validate_tables(
         coolprop_row: dict[str, float | str] = {
             "sample_id": sample_id,
             "region": region,
-            "error_source_category": category,
-            "coolprop_phase": target_phase,
             "temperature_K": temperature_k,
             "pressure_MPa": pressure_pa / 1.0e6,
         }
         interpolated_row: dict[str, float | str] = {
             "sample_id": sample_id,
             "region": region,
-            "error_source_category": category,
-            "coolprop_phase": target_phase,
             "temperature_K": temperature_k,
             "pressure_MPa": pressure_pa / 1.0e6,
         }
@@ -629,9 +506,6 @@ def validate_tables(
                     "property": property_name,
                     "sample_id": sample_id,
                     "region": region,
-                    "error_source_category": category,
-                    "coolprop_phase": target_phase,
-                    "cell_corner_phase_families": corner_families,
                     "temperature_K": temperature_k,
                     "pressure_Pa": pressure_pa,
                     "pressure_MPa": pressure_pa / 1.0e6,
@@ -646,11 +520,10 @@ def validate_tables(
         interpolated_samples.append(interpolated_row)
 
     summaries = summarize_errors(rows)
-    category_summaries = summarize_errors_by_category(rows)
     print(f"Validated points: {len(rows)} property samples")
     print(f"CoolProp failures skipped: {coolprop_failures}")
     print(f"NaN interpolations skipped: {nan_interpolations}")
-    return rows, summaries, category_summaries, sample_points, coolprop_samples, interpolated_samples
+    return rows, summaries, sample_points, coolprop_samples, interpolated_samples
 
 
 def write_dict_csv(path: Path, rows: list[dict[str, float | str]]) -> None:
@@ -806,12 +679,7 @@ def plot_critical_profile(config: ValidationConfig, output_dir: Path) -> None:
     plt.close(fig)
 
 
-def write_report(
-    config: ValidationConfig,
-    summaries: list[dict[str, float | str]],
-    category_summaries: list[dict[str, float | str]],
-    output_dir: Path,
-) -> None:
+def write_report(config: ValidationConfig, summaries: list[dict[str, float | str]], output_dir: Path) -> None:
     lines = [
         "# CO2 2D Table Validation Report",
         "",
@@ -840,23 +708,6 @@ def write_report(
     lines.extend(
         [
             "",
-            "## Error Source Summary",
-            "",
-            "| Property | Error source | Valid points | Mean rel. error | P95 rel. error | Max rel. error |",
-            "|---|---|---:|---:|---:|---:|",
-        ]
-    )
-    for row in category_summaries:
-        lines.append(
-            f"| {row['property']} | {row['error_source_category']} | {row['valid_points']} | "
-            f"{float(row['mean_relative_error']):.6e} | "
-            f"{float(row['p95_relative_error']):.6e} | "
-            f"{float(row['max_relative_error']):.6e} |"
-        )
-
-    lines.extend(
-        [
-            "",
             "## Data Tables",
             "",
             "- `validation_sample_points.csv`",
@@ -864,7 +715,6 @@ def write_report(
             "- `csv_interpolated_property_samples.csv`",
             "- `validation_point_errors.csv`",
             "- `validation_error_summary.csv`",
-            "- `validation_error_source_summary.csv`",
             "",
             "## Figures",
             "",
@@ -882,14 +732,13 @@ def write_report(
 
 def run_validation(config: ValidationConfig) -> None:
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    rows, summaries, category_summaries, sample_points, coolprop_samples, interpolated_samples = validate_tables(config)
+    rows, summaries, sample_points, coolprop_samples, interpolated_samples = validate_tables(config)
     write_dict_csv(config.output_dir / "validation_sample_points.csv", sample_points)
     write_dict_csv(config.output_dir / "coolprop_property_samples.csv", coolprop_samples)
     write_dict_csv(config.output_dir / "csv_interpolated_property_samples.csv", interpolated_samples)
     write_dict_csv(config.output_dir / "validation_point_errors.csv", rows)
     write_dict_csv(config.output_dir / "validation_error_summary.csv", summaries)
-    write_dict_csv(config.output_dir / "validation_error_source_summary.csv", category_summaries)
-    write_report(config, summaries, category_summaries, config.output_dir)
+    write_report(config, summaries, config.output_dir)
 
     if rows:
         plot_error_boxplot(config.output_dir, rows)
@@ -932,24 +781,6 @@ def parse_args() -> ValidationConfig:
         default=DEFAULT_INTERPOLATION_METHOD,
         help="CSV interpolation method used for validation",
     )
-    parser.add_argument(
-        "--near-critical-t-window",
-        type=float,
-        default=DEFAULT_NEAR_CRITICAL_T_WINDOW,
-        help="Temperature half-window for near-critical classification, K",
-    )
-    parser.add_argument(
-        "--near-critical-p-window",
-        type=float,
-        default=DEFAULT_NEAR_CRITICAL_P_WINDOW,
-        help="Pressure half-window for near-critical classification, Pa",
-    )
-    parser.add_argument(
-        "--near-saturation-rel-p",
-        type=float,
-        default=DEFAULT_NEAR_SATURATION_REL_P,
-        help="Relative pressure tolerance for near-saturation classification",
-    )
 
     args = parser.parse_args()
     if args.critical_samples < 0:
@@ -967,9 +798,6 @@ def parse_args() -> ValidationConfig:
         critical_p_min=args.critical_p_min,
         critical_p_max=args.critical_p_max,
         interpolation_method=args.interpolation_method,
-        near_critical_t_window=args.near_critical_t_window,
-        near_critical_p_window=args.near_critical_p_window,
-        near_saturation_rel_p=args.near_saturation_rel_p,
     )
 
 
