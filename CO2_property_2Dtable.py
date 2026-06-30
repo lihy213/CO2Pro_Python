@@ -12,6 +12,10 @@ The default ranges match the Julia script:
     T = 220.0:0.5:1500.0 K
     P = 50000.0:100000.0:40000000.0 Pa
 
+Two grid modes are supported:
+    uniform  : one temperature step and one pressure step for the full range
+    critical : full-range base grid plus refined T/P points near the critical region
+
 The Julia range with a fixed step stops at the last value not greater than the
 maximum, so the default pressure grid ends at 39,950,000 Pa.
 """
@@ -42,6 +46,13 @@ DEFAULT_P_STEP = 100_000.0
 DEFAULT_OUTPUT_DIR = Path(".")
 DEFAULT_WORKERS = max(1, (os.cpu_count() or 2) - 1)
 DEFAULT_ERROR_LOG = Path("CO2_2Dtable_errors.log")
+DEFAULT_GRID_MODE = "uniform"
+DEFAULT_CRITICAL_T_MIN = 300.0
+DEFAULT_CRITICAL_T_MAX = 310.0
+DEFAULT_CRITICAL_T_STEP = 0.05
+DEFAULT_CRITICAL_P_MIN = 7.0e6
+DEFAULT_CRITICAL_P_MAX = 8.0e6
+DEFAULT_CRITICAL_P_STEP = 10_000.0
 
 
 PROPERTY_FILES = {
@@ -55,12 +66,19 @@ PROPERTY_FILES = {
 @dataclass(frozen=True)
 class TableConfig:
     fluid: str
+    grid_mode: str
     t_min: float
     t_max: float
     t_step: float
     p_min: float
     p_max: float
     p_step: float
+    critical_t_min: float
+    critical_t_max: float
+    critical_t_step: float
+    critical_p_min: float
+    critical_p_max: float
+    critical_p_step: float
     output_dir: Path
     workers: int
     error_log: Path
@@ -81,6 +99,47 @@ def stepped_range(start: float, stop: float, step: float) -> list[float]:
         current += step
 
     return values
+
+
+def merge_grids(base_grid: list[float], refined_grid: list[float]) -> list[float]:
+    return sorted({round(value, 12) for value in [*base_grid, *refined_grid]})
+
+
+def clipped_stepped_range(
+    start: float,
+    stop: float,
+    step: float,
+    global_min: float,
+    global_max: float,
+) -> list[float]:
+    clipped_start = max(start, global_min)
+    clipped_stop = min(stop, global_max)
+    if clipped_stop < clipped_start:
+        return []
+    return stepped_range(clipped_start, clipped_stop, step)
+
+
+def build_axis_grid(
+    start: float,
+    stop: float,
+    step: float,
+    grid_mode: str,
+    critical_start: float,
+    critical_stop: float,
+    critical_step: float,
+) -> list[float]:
+    base_grid = stepped_range(start, stop, step)
+    if grid_mode == "uniform":
+        return base_grid
+
+    refined_grid = clipped_stepped_range(
+        critical_start,
+        critical_stop,
+        critical_step,
+        start,
+        stop,
+    )
+    return merge_grids(base_grid, refined_grid)
 
 
 def calc_row(args: tuple[int, float, list[float], str]) -> tuple[int, float, dict[str, list[float]], list[str]]:
@@ -127,8 +186,24 @@ def write_error_log(path: Path, errors: list[str]) -> None:
 
 
 def generate_tables(config: TableConfig) -> None:
-    temperatures = stepped_range(config.t_min, config.t_max, config.t_step)
-    pressures = stepped_range(config.p_min, config.p_max, config.p_step)
+    temperatures = build_axis_grid(
+        config.t_min,
+        config.t_max,
+        config.t_step,
+        config.grid_mode,
+        config.critical_t_min,
+        config.critical_t_max,
+        config.critical_t_step,
+    )
+    pressures = build_axis_grid(
+        config.p_min,
+        config.p_max,
+        config.p_step,
+        config.grid_mode,
+        config.critical_p_min,
+        config.critical_p_max,
+        config.critical_p_step,
+    )
     total_rows = len(pressures)
     total_points = len(temperatures) * len(pressures)
 
@@ -138,6 +213,7 @@ def generate_tables(config: TableConfig) -> None:
         error_log = config.output_dir / error_log
 
     print(f"Fluid: {config.fluid}")
+    print(f"Grid mode: {config.grid_mode}")
     print(f"Temperature grid: {len(temperatures)} points, {temperatures[0]}-{temperatures[-1]} K")
     print(
         f"Pressure grid: {len(pressures)} points, "
@@ -146,6 +222,14 @@ def generate_tables(config: TableConfig) -> None:
     )
     print(f"Total states: {total_points}")
     print(f"Workers: {config.workers}")
+    if config.grid_mode == "critical":
+        print(
+            "Critical refinement: "
+            f"T={config.critical_t_min}-{config.critical_t_max} K "
+            f"step {config.critical_t_step} K; "
+            f"P={config.critical_p_min}-{config.critical_p_max} Pa "
+            f"step {config.critical_p_step} Pa"
+        )
 
     tasks = [
         (row_index, pressure, temperatures, config.fluid)
@@ -211,12 +295,54 @@ def parse_args() -> TableConfig:
         description="Generate Fluent-friendly 2D CO2 property CSV tables with CoolProp."
     )
     parser.add_argument("--fluid", default=DEFAULT_FLUID, help=f"CoolProp fluid name. Default: {DEFAULT_FLUID}")
+    parser.add_argument(
+        "--grid-mode",
+        choices=("uniform", "critical"),
+        default=DEFAULT_GRID_MODE,
+        help="Grid mode: uniform uses one step over the full range; critical adds refined points near the critical region.",
+    )
     parser.add_argument("--t-min", type=float, default=DEFAULT_T_MIN, help="Minimum temperature, K")
     parser.add_argument("--t-max", type=float, default=DEFAULT_T_MAX, help="Maximum temperature, K")
     parser.add_argument("--t-step", type=positive_float, default=DEFAULT_T_STEP, help="Temperature step, K")
     parser.add_argument("--p-min", type=float, default=DEFAULT_P_MIN, help="Minimum pressure, Pa")
     parser.add_argument("--p-max", type=float, default=DEFAULT_P_MAX, help="Maximum pressure, Pa")
     parser.add_argument("--p-step", type=positive_float, default=DEFAULT_P_STEP, help="Pressure step, Pa")
+    parser.add_argument(
+        "--critical-t-min",
+        type=float,
+        default=DEFAULT_CRITICAL_T_MIN,
+        help="Critical-region minimum temperature, K",
+    )
+    parser.add_argument(
+        "--critical-t-max",
+        type=float,
+        default=DEFAULT_CRITICAL_T_MAX,
+        help="Critical-region maximum temperature, K",
+    )
+    parser.add_argument(
+        "--critical-t-step",
+        type=positive_float,
+        default=DEFAULT_CRITICAL_T_STEP,
+        help="Critical-region temperature step, K",
+    )
+    parser.add_argument(
+        "--critical-p-min",
+        type=float,
+        default=DEFAULT_CRITICAL_P_MIN,
+        help="Critical-region minimum pressure, Pa",
+    )
+    parser.add_argument(
+        "--critical-p-max",
+        type=float,
+        default=DEFAULT_CRITICAL_P_MAX,
+        help="Critical-region maximum pressure, Pa",
+    )
+    parser.add_argument(
+        "--critical-p-step",
+        type=positive_float,
+        default=DEFAULT_CRITICAL_P_STEP,
+        help="Critical-region pressure step, Pa",
+    )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Directory for output CSV files")
     parser.add_argument(
         "--workers",
@@ -234,12 +360,19 @@ def parse_args() -> TableConfig:
     args = parser.parse_args()
     return TableConfig(
         fluid=args.fluid,
+        grid_mode=args.grid_mode,
         t_min=args.t_min,
         t_max=args.t_max,
         t_step=args.t_step,
         p_min=args.p_min,
         p_max=args.p_max,
         p_step=args.p_step,
+        critical_t_min=args.critical_t_min,
+        critical_t_max=args.critical_t_max,
+        critical_t_step=args.critical_t_step,
+        critical_p_min=args.critical_p_min,
+        critical_p_max=args.critical_p_max,
+        critical_p_step=args.critical_p_step,
         output_dir=args.output_dir,
         workers=args.workers,
         error_log=args.error_log,

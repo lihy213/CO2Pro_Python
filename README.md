@@ -127,12 +127,37 @@ DEFAULT_T_STEP = 0.5
 DEFAULT_P_MAX = 40_000_000.0
 DEFAULT_P_STEP = 100_000.0
 DEFAULT_WORKERS = max(1, (os.cpu_count() or 2) - 1)
+DEFAULT_GRID_MODE = "uniform"
 ```
 
 直接运行：
 
 ```powershell
 python CO2_property_2Dtable.py
+```
+
+默认使用全区间等步长模式：
+
+```powershell
+python CO2_property_2Dtable.py --grid-mode uniform
+```
+
+如果希望在 CO2 临界区附近单独加密，可以使用 `critical` 模式。脚本会先生成全区间基础网格，再把临界区细网格合并进去并排序去重：
+
+```powershell
+python CO2_property_2Dtable.py --grid-mode critical
+```
+
+临界区加密参数也可以单独指定。例如，在 300-310 K、7-8 MPa 附近加密：
+
+```powershell
+python CO2_property_2Dtable.py --grid-mode critical --critical-t-min 300 --critical-t-max 310 --critical-t-step 0.05 --critical-p-min 7000000 --critical-p-max 8000000 --critical-p-step 10000
+```
+
+如果只想覆盖较小范围并加密临界区，可以这样测试：
+
+```powershell
+python CO2_property_2Dtable.py --grid-mode critical --t-min 295 --t-max 315 --t-step 2 --p-min 6000000 --p-max 9000000 --p-step 500000 --critical-t-min 302 --critical-t-max 306 --critical-t-step 0.1 --critical-p-min 7200000 --critical-p-max 7600000 --critical-p-step 50000 --output-dir critical_test --workers 4
 ```
 
 指定输出文件夹和并行进程数：
@@ -153,7 +178,13 @@ python CO2_property_2Dtable.py --t-min 220 --t-max 230 --t-step 1 --p-min 50000 
 --t-max 900 --p-max 25000000 --t-step 1 --p-step 50000 --output-dir fluent_tables --workers 6
 ```
 
-这个脚本使用 Python `ProcessPoolExecutor` 并行计算。每个任务负责一个压力行下的全部温度点，输出时会按压力从小到大排序，便于 Fluent UDF 读取。
+临界区加密模式在 PyCharm 中也一样填写到 Parameters 中，例如：
+
+```powershell
+--grid-mode critical --critical-t-min 300 --critical-t-max 310 --critical-t-step 0.05 --critical-p-min 7000000 --critical-p-max 8000000 --critical-p-step 10000 --output-dir fluent_tables --workers 6
+```
+
+这个脚本使用 Python `ProcessPoolExecutor` 并行计算。每个任务负责一个压力行下的全部温度点，输出时会按压力从小到大排序，便于 Fluent UDF 读取。无论使用 `uniform` 还是 `critical` 模式，输出 CSV 都保持同样的二维表结构，只是温度列和压力行可以变为非均匀间隔。
 
 ## 给 STAR-CCM+ 或 Fluent 使用时的提醒
 
