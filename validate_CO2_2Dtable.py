@@ -280,26 +280,63 @@ def summarize_errors(rows: list[dict[str, float | str]]) -> list[dict[str, float
     return summaries
 
 
-def validate_tables(config: ValidationConfig) -> tuple[list[dict[str, float | str]], list[dict[str, float | str]]]:
+def validate_tables(
+    config: ValidationConfig,
+) -> tuple[
+    list[dict[str, float | str]],
+    list[dict[str, float | str]],
+    list[dict[str, float | str]],
+    list[dict[str, float | str]],
+    list[dict[str, float | str]],
+]:
     tables = {
         property_name: load_property_table(config.table_dir, property_name)
         for property_name in PROPERTY_CONFIG
     }
     points = build_validation_points(config, tables)
     rows: list[dict[str, float | str]] = []
+    sample_points: list[dict[str, float | str]] = []
+    coolprop_samples: list[dict[str, float | str]] = []
+    interpolated_samples: list[dict[str, float | str]] = []
     coolprop_failures = 0
     nan_interpolations = 0
 
-    for temperature_k, pressure_pa, region in points:
+    for sample_id, (temperature_k, pressure_pa, region) in enumerate(points, start=1):
+        sample_points.append(
+            {
+                "sample_id": sample_id,
+                "region": region,
+                "temperature_K": temperature_k,
+                "pressure_Pa": pressure_pa,
+                "pressure_MPa": pressure_pa / 1.0e6,
+            }
+        )
+        coolprop_row: dict[str, float | str] = {
+            "sample_id": sample_id,
+            "region": region,
+            "temperature_K": temperature_k,
+            "pressure_MPa": pressure_pa / 1.0e6,
+        }
+        interpolated_row: dict[str, float | str] = {
+            "sample_id": sample_id,
+            "region": region,
+            "temperature_K": temperature_k,
+            "pressure_MPa": pressure_pa / 1.0e6,
+        }
+
         for property_name, table in tables.items():
             key = PROPERTY_CONFIG[property_name]["coolprop_key"]
             try:
                 reference = PropsSI(key, "T", temperature_k, "P", pressure_pa, config.fluid)
             except Exception:
                 coolprop_failures += 1
+                coolprop_row[property_name] = math.nan
+                interpolated_row[property_name] = math.nan
                 continue
 
             interpolated = bilinear_interpolate(table, pressure_pa, temperature_k)
+            coolprop_row[property_name] = reference
+            interpolated_row[property_name] = interpolated
             if math.isnan(interpolated):
                 nan_interpolations += 1
                 continue
@@ -309,8 +346,10 @@ def validate_tables(config: ValidationConfig) -> tuple[list[dict[str, float | st
             rows.append(
                 {
                     "property": property_name,
+                    "sample_id": sample_id,
                     "region": region,
                     "temperature_K": temperature_k,
+                    "pressure_Pa": pressure_pa,
                     "pressure_MPa": pressure_pa / 1.0e6,
                     "coolprop_value": reference,
                     "table_interp_value": interpolated,
@@ -319,11 +358,14 @@ def validate_tables(config: ValidationConfig) -> tuple[list[dict[str, float | st
                 }
             )
 
+        coolprop_samples.append(coolprop_row)
+        interpolated_samples.append(interpolated_row)
+
     summaries = summarize_errors(rows)
     print(f"Validated points: {len(rows)} property samples")
     print(f"CoolProp failures skipped: {coolprop_failures}")
     print(f"NaN interpolations skipped: {nan_interpolations}")
-    return rows, summaries
+    return rows, summaries, sample_points, coolprop_samples, interpolated_samples
 
 
 def write_dict_csv(path: Path, rows: list[dict[str, float | str]]) -> None:
@@ -507,6 +549,14 @@ def write_report(config: ValidationConfig, summaries: list[dict[str, float | str
     lines.extend(
         [
             "",
+            "## Data Tables",
+            "",
+            "- `validation_sample_points.csv`",
+            "- `coolprop_property_samples.csv`",
+            "- `csv_interpolated_property_samples.csv`",
+            "- `validation_point_errors.csv`",
+            "- `validation_error_summary.csv`",
+            "",
             "## Figures",
             "",
             "- `relative_error_boxplot.png`",
@@ -523,7 +573,10 @@ def write_report(config: ValidationConfig, summaries: list[dict[str, float | str
 
 def run_validation(config: ValidationConfig) -> None:
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    rows, summaries = validate_tables(config)
+    rows, summaries, sample_points, coolprop_samples, interpolated_samples = validate_tables(config)
+    write_dict_csv(config.output_dir / "validation_sample_points.csv", sample_points)
+    write_dict_csv(config.output_dir / "coolprop_property_samples.csv", coolprop_samples)
+    write_dict_csv(config.output_dir / "csv_interpolated_property_samples.csv", interpolated_samples)
     write_dict_csv(config.output_dir / "validation_point_errors.csv", rows)
     write_dict_csv(config.output_dir / "validation_error_summary.csv", summaries)
     write_report(config, summaries, config.output_dir)

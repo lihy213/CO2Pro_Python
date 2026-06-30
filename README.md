@@ -225,6 +225,9 @@ python validate_CO2_2Dtable.py --table-dir fluent_tables --output-dir validation
 
 | 文件 | 内容 |
 |---|---|
+| `validation_sample_points.csv` | 验证过程中抽取的温度、压力组合，含 sample_id、区域标签、K、Pa、MPa |
+| `coolprop_property_samples.csv` | 每个抽样点的 CoolProp 直接查询物性宽表 |
+| `csv_interpolated_property_samples.csv` | 每个抽样点由 CSV 双线性插值得到的物性宽表 |
 | `validation_point_errors.csv` | 每个随机点的 CoolProp 值、表格插值值、绝对误差、相对误差 |
 | `validation_error_summary.csv` | 每种物性的平均误差、95% 分位误差、最大误差 |
 | `validation_report.md` | Markdown 验证报告 |
