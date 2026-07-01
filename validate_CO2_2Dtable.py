@@ -35,26 +35,27 @@ DEFAULT_CRITICAL_T_MAX = 310.0
 DEFAULT_CRITICAL_P_MIN = 7.0e6
 DEFAULT_CRITICAL_P_MAX = 8.0e6
 DEFAULT_INTERPOLATION_METHOD = "phase-aware"
+DEFAULT_GRID_MODE = "critical"
 
 
 PROPERTY_CONFIG = {
     "density": {
-        "file": "co2_density.csv",
+        "file_base": "co2_density",
         "coolprop_key": "D",
         "unit": "kg/m3",
     },
     "viscosity": {
-        "file": "co2_viscosity.csv",
+        "file_base": "co2_viscosity",
         "coolprop_key": "V",
         "unit": "Pa s",
     },
     "cp": {
-        "file": "co2_cp.csv",
+        "file_base": "co2_cp",
         "coolprop_key": "C",
         "unit": "J/(kg K)",
     },
     "conductivity": {
-        "file": "co2_conductivity.csv",
+        "file_base": "co2_conductivity",
         "coolprop_key": "L",
         "unit": "W/(m K)",
     },
@@ -81,6 +82,7 @@ class ValidationConfig:
     table_dir: Path
     output_dir: Path
     fluid: str
+    grid_mode: str
     samples: int
     seed: int
     critical_samples: int
@@ -98,9 +100,13 @@ def parse_float(value: str) -> float:
     return float(stripped)
 
 
-def load_property_table(table_dir: Path, property_name: str) -> PropertyTable:
+def table_filename(file_base: str, grid_mode: str) -> str:
+    return f"{file_base}_{grid_mode}.csv"
+
+
+def load_property_table(table_dir: Path, property_name: str, grid_mode: str) -> PropertyTable:
     config = PROPERTY_CONFIG[property_name]
-    path = table_dir / config["file"]
+    path = table_dir / table_filename(config["file_base"], grid_mode)
     if not path.exists():
         raise FileNotFoundError(f"Missing table file: {path}")
 
@@ -131,8 +137,8 @@ def load_property_table(table_dir: Path, property_name: str) -> PropertyTable:
     )
 
 
-def load_phase_table(table_dir: Path) -> PhaseTable | None:
-    path = table_dir / "co2_phase.csv"
+def load_phase_table(table_dir: Path, grid_mode: str) -> PhaseTable | None:
+    path = table_dir / table_filename("co2_phase", grid_mode)
     if not path.exists():
         return None
 
@@ -432,13 +438,14 @@ def validate_tables(
     list[dict[str, float | str]],
 ]:
     tables = {
-        property_name: load_property_table(config.table_dir, property_name)
+        property_name: load_property_table(config.table_dir, property_name, config.grid_mode)
         for property_name in PROPERTY_CONFIG
     }
-    phase_table = load_phase_table(config.table_dir)
+    phase_table = load_phase_table(config.table_dir, config.grid_mode)
     if config.interpolation_method == "phase-aware" and phase_table is None:
         raise FileNotFoundError(
-            "phase-aware interpolation requires co2_phase.csv in the table directory. "
+            f"phase-aware interpolation requires {table_filename('co2_phase', config.grid_mode)} "
+            "in the table directory. "
             "Please regenerate the property tables with the latest CO2_property_2Dtable.py, "
             "or use --interpolation-method bilinear to validate old tables."
         )
@@ -633,7 +640,7 @@ def plot_error_vs_pressure(output_dir: Path, rows: list[dict[str, float | str]])
 def plot_critical_profile(config: ValidationConfig, output_dir: Path) -> None:
     plt = require_matplotlib()
     tables = {
-        property_name: load_property_table(config.table_dir, property_name)
+        property_name: load_property_table(config.table_dir, property_name, config.grid_mode)
         for property_name in PROPERTY_CONFIG
     }
     t_min, t_max, p_min, p_max = table_domain(tables)
@@ -684,6 +691,7 @@ def write_report(config: ValidationConfig, summaries: list[dict[str, float | str
         "# CO2 2D Table Validation Report",
         "",
         f"- Table directory: `{config.table_dir}`",
+        f"- Grid mode: `{config.grid_mode}`",
         f"- Fluid: `{config.fluid}`",
         f"- Global random samples: `{config.samples}`",
         f"- Critical-region random samples: `{config.critical_samples}`",
@@ -763,6 +771,12 @@ def parse_args() -> ValidationConfig:
     parser.add_argument("--table-dir", type=Path, default=DEFAULT_TABLE_DIR, help="Directory containing CO2 CSV tables")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Directory for validation outputs")
     parser.add_argument("--fluid", default=DEFAULT_FLUID, help=f"CoolProp fluid name. Default: {DEFAULT_FLUID}")
+    parser.add_argument(
+        "--grid-mode",
+        choices=("uniform", "critical"),
+        default=DEFAULT_GRID_MODE,
+        help="Table filename suffix to validate: uniform reads *_uniform.csv; critical reads *_critical.csv.",
+    )
     parser.add_argument("--samples", type=positive_int, default=DEFAULT_SAMPLES, help="Global random validation points")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Random seed")
     parser.add_argument(
@@ -790,6 +804,7 @@ def parse_args() -> ValidationConfig:
         table_dir=args.table_dir,
         output_dir=args.output_dir,
         fluid=args.fluid,
+        grid_mode=args.grid_mode,
         samples=args.samples,
         seed=args.seed,
         critical_samples=args.critical_samples,

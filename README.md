@@ -208,42 +208,47 @@ CoolProp 直接查询值 vs CSV 插值值
 
 默认插值方法为 `phase-aware`。如果插值单元四个角点相态一致，则使用普通双线性插值；如果四个角点跨越气液相边界，则根据目标点相态，只使用同相角点做反距离加权插值，避免把液相角点混入气相点，或把气相角点混入液相点。
 
-默认会读取当前文件夹下的 4 个表：
+默认会根据 `--grid-mode` 读取当前文件夹下的 4 个表和相态表：
 
-- `co2_density.csv`
-- `co2_viscosity.csv`
-- `co2_cp.csv`
-- `co2_conductivity.csv`
-- `co2_phase.csv`
+- `co2_density_<grid_mode>.csv`
+- `co2_viscosity_<grid_mode>.csv`
+- `co2_cp_<grid_mode>.csv`
+- `co2_conductivity_<grid_mode>.csv`
+- `co2_phase_<grid_mode>.csv`
+
+例如：
+
+- `--grid-mode uniform` 读取 `co2_density_uniform.csv`、`co2_viscosity_uniform.csv` 等。
+- `--grid-mode critical` 读取 `co2_density_critical.csv`、`co2_viscosity_critical.csv` 等。
 
 在表格所在文件夹中运行：
 
 ```powershell
-python validate_CO2_2Dtable.py
+python validate_CO2_2Dtable.py --grid-mode critical
 ```
 
 指定表格目录、输出目录和采样点数：
 
 ```powershell
-python validate_CO2_2Dtable.py --table-dir fluent_tables --output-dir validation_results --samples 1000 --critical-samples 300
+python validate_CO2_2Dtable.py --grid-mode critical --table-dir fluent_tables --output-dir validation_results --samples 1000 --critical-samples 300
 ```
 
 复现旧版普通双线性插值结果：
 
 ```powershell
-python validate_CO2_2Dtable.py --table-dir fluent_tables --output-dir validation_bilinear --interpolation-method bilinear
+python validate_CO2_2Dtable.py --grid-mode critical --table-dir fluent_tables --output-dir validation_bilinear --interpolation-method bilinear
 ```
 
 使用相态感知插值：
 
 ```powershell
-python validate_CO2_2Dtable.py --table-dir fluent_tables --output-dir validation_phase_aware --interpolation-method phase-aware
+python validate_CO2_2Dtable.py --grid-mode critical --table-dir fluent_tables --output-dir validation_phase_aware --interpolation-method phase-aware
 ```
 
 在 PyCharm 中，也可以把下面内容填到 Parameters：
 
 ```powershell
---table-dir fluent_tables --output-dir validation_results --samples 1000 --critical-samples 300
+--grid-mode critical --table-dir fluent_tables --output-dir validation_results --samples 1000 --critical-samples 300
 ```
 
 输出文件包括：
