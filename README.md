@@ -101,11 +101,18 @@ python CO2_property_table.py --t-min 300 --t-max 900 --t-count 500 --p-min 10000
 
 | 文件 | 物性 |
 |---|---|
-| `co2_density.csv` | 密度，kg/m3 |
-| `co2_viscosity.csv` | 动力黏度，Pa s |
-| `co2_cp.csv` | 定压比热，J/(kg K) |
-| `co2_conductivity.csv` | 导热率，W/(m K) |
-| `co2_phase.csv` | CoolProp 相态标签，用于识别气相、液相、超临界区和跨相插值风险 |
+| `co2_density_<grid_mode>.csv` | 密度，kg/m3 |
+| `co2_viscosity_<grid_mode>.csv` | 动力黏度，Pa s |
+| `co2_cp_<grid_mode>.csv` | 定压比热，J/(kg K) |
+| `co2_conductivity_<grid_mode>.csv` | 导热率，W/(m K) |
+| `co2_phase_<grid_mode>.csv` | CoolProp 相态标签，用于识别气相、液相、超临界区和跨相插值风险 |
+
+其中 `<grid_mode>` 会根据 `--grid-mode` 自动写入文件名：
+
+- `--grid-mode uniform` 输出 `co2_density_uniform.csv`、`co2_viscosity_uniform.csv` 等。
+- `--grid-mode critical` 输出 `co2_density_critical.csv`、`co2_viscosity_critical.csv` 等。
+
+注意：当前 Fluent UDF 默认读取 `co2_density.csv`、`co2_viscosity.csv`、`co2_cp.csv`、`co2_conductivity.csv` 和 `co2_phase.csv`。用于 Fluent 计算前，可以把选定模式的一组文件复制或重命名为 UDF 默认文件名，避免 uniform 与 critical 表混用。
 
 每个 CSV 都采用二维矩阵格式：第一列为压力，第一行为温度。脚本内部仍使用 Pa 调用 CoolProp，输出 CSV 的第一列压力换算为 MPa。结构如下：
 
@@ -187,7 +194,7 @@ python CO2_property_2Dtable.py --t-min 220 --t-max 230 --t-step 1 --p-min 50000 
 --grid-mode critical --critical-t-min 300 --critical-t-max 310 --critical-t-step 0.05 --critical-p-min 7000000 --critical-p-max 8000000 --critical-p-step 10000 --output-dir fluent_tables --workers 6
 ```
 
-这个脚本使用 Python `ProcessPoolExecutor` 并行计算。每个任务负责一个压力行下的全部温度点，输出时会按压力从小到大排序，便于 Fluent UDF 读取。无论使用 `uniform` 还是 `critical` 模式，输出 CSV 都保持同样的二维表结构，只是温度列和压力行可以变为非均匀间隔。
+这个脚本使用 Python `ProcessPoolExecutor` 并行计算。每个任务负责一个压力行下的全部温度点，输出时会按压力从小到大排序，便于 Fluent UDF 读取。无论使用 `uniform` 还是 `critical` 模式，输出 CSV 都保持同样的二维表结构，只是温度列和压力行可以变为非均匀间隔。输出文件名会自动带有网格模式后缀，例如 `co2_density_uniform.csv` 或 `co2_density_critical.csv`，便于区分不同表格。
 
 生成脚本会对基础网格和临界区加密网格进行容差去重，避免 `310.0` 与 `310.000000000002` 这类浮点累加造成的重复列。
 

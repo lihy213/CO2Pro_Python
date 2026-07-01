@@ -56,11 +56,11 @@ DEFAULT_CRITICAL_P_STEP = 10_000.0
 
 
 PROPERTY_FILES = {
-    "density": "co2_density.csv",
-    "viscosity": "co2_viscosity.csv",
-    "cp": "co2_cp.csv",
-    "conductivity": "co2_conductivity.csv",
-    "phase": "co2_phase.csv",
+    "density": "co2_density",
+    "viscosity": "co2_viscosity",
+    "cp": "co2_cp",
+    "conductivity": "co2_conductivity",
+    "phase": "co2_phase",
 }
 
 
@@ -188,6 +188,11 @@ def write_property_table(path: Path, temperatures: list[float], rows: list[tuple
             writer.writerow([pressure / 1.0e6, *values])
 
 
+def output_filename(property_name: str, grid_mode: str) -> str:
+    """Return an output CSV filename that records the grid mode."""
+    return f"{PROPERTY_FILES[property_name]}_{grid_mode}.csv"
+
+
 def write_error_log(path: Path, errors: list[str]) -> None:
     if not errors:
         return
@@ -273,7 +278,7 @@ def generate_tables(config: TableConfig) -> None:
 
     for property_name, rows in property_rows.items():
         rows.sort(key=lambda item: item[0])
-        output_path = config.output_dir / PROPERTY_FILES[property_name]
+        output_path = config.output_dir / output_filename(property_name, config.grid_mode)
         write_property_table(
             output_path,
             temperatures,
