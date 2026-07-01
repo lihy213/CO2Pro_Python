@@ -19,7 +19,6 @@ import random
 import statistics
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 from CoolProp.CoolProp import PhaseSI, PropsSI
 
@@ -58,6 +57,11 @@ PROPERTY_CONFIG = {
         "file_base": "co2_conductivity",
         "coolprop_key": "L",
         "unit": "W/(m K)",
+    },
+    "sound_speed": {
+        "file_base": "co2_sound_speed",
+        "coolprop_key": "A",
+        "unit": "m/s",
     },
 }
 
@@ -552,6 +556,19 @@ def require_matplotlib():
     return plt
 
 
+def property_axes(plt, properties: list[str], width: float = 12.0):
+    ncols = 3 if len(properties) > 4 else 2
+    nrows = math.ceil(len(properties) / ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(width, 3.4 * nrows), sharex=True)
+    if hasattr(axes, "ravel"):
+        axes_list = list(axes.ravel())
+    else:
+        axes_list = [axes]
+    for ax in axes_list[len(properties):]:
+        ax.set_visible(False)
+    return fig, axes_list, nrows, ncols
+
+
 def plot_error_boxplot(output_dir: Path, rows: list[dict[str, float | str]]) -> None:
     plt = require_matplotlib()
     properties = list(PROPERTY_CONFIG.keys())
@@ -579,8 +596,8 @@ def plot_error_vs_temperature(output_dir: Path, rows: list[dict[str, float | str
     plt = require_matplotlib()
     properties = list(PROPERTY_CONFIG.keys())
 
-    fig, axes = plt.subplots(2, 2, figsize=(10, 7), sharex=True)
-    for ax, property_name in zip(axes.ravel(), properties):
+    fig, axes, nrows, ncols = property_axes(plt, properties)
+    for ax, property_name in zip(axes, properties):
         property_rows = [row for row in rows if row["property"] == property_name]
         colors = ["tab:red" if row["region"] == "critical" else "tab:blue" for row in property_rows]
         ax.scatter(
@@ -595,10 +612,11 @@ def plot_error_vs_temperature(output_dir: Path, rows: list[dict[str, float | str
         ax.set_title(property_name)
         ax.grid(True, which="both", alpha=0.3)
 
-    for ax in axes[-1]:
-        ax.set_xlabel("Temperature / K")
-    for ax in axes[:, 0]:
-        ax.set_ylabel("Relative error / %")
+    for index, ax in enumerate(axes[:len(properties)]):
+        if index // ncols == nrows - 1:
+            ax.set_xlabel("Temperature / K")
+        if index % ncols == 0:
+            ax.set_ylabel("Relative error / %")
 
     fig.suptitle("Interpolation relative error vs temperature")
     fig.tight_layout()
@@ -610,8 +628,8 @@ def plot_error_vs_pressure(output_dir: Path, rows: list[dict[str, float | str]])
     plt = require_matplotlib()
     properties = list(PROPERTY_CONFIG.keys())
 
-    fig, axes = plt.subplots(2, 2, figsize=(10, 7), sharex=True)
-    for ax, property_name in zip(axes.ravel(), properties):
+    fig, axes, nrows, ncols = property_axes(plt, properties)
+    for ax, property_name in zip(axes, properties):
         property_rows = [row for row in rows if row["property"] == property_name]
         colors = ["tab:red" if row["region"] == "critical" else "tab:blue" for row in property_rows]
         ax.scatter(
@@ -626,10 +644,11 @@ def plot_error_vs_pressure(output_dir: Path, rows: list[dict[str, float | str]])
         ax.set_title(property_name)
         ax.grid(True, which="both", alpha=0.3)
 
-    for ax in axes[-1]:
-        ax.set_xlabel("Pressure / MPa")
-    for ax in axes[:, 0]:
-        ax.set_ylabel("Relative error / %")
+    for index, ax in enumerate(axes[:len(properties)]):
+        if index // ncols == nrows - 1:
+            ax.set_xlabel("Pressure / MPa")
+        if index % ncols == 0:
+            ax.set_ylabel("Relative error / %")
 
     fig.suptitle("Interpolation relative error vs pressure")
     fig.tight_layout()
@@ -656,8 +675,9 @@ def plot_critical_profile(config: ValidationConfig, output_dir: Path) -> None:
         for i in range(201)
     ]
 
-    fig, axes = plt.subplots(2, 2, figsize=(10, 7), sharex=True)
-    for ax, property_name in zip(axes.ravel(), PROPERTY_CONFIG.keys()):
+    properties = list(PROPERTY_CONFIG.keys())
+    fig, axes, nrows, ncols = property_axes(plt, properties)
+    for ax, property_name in zip(axes, properties):
         table = tables[property_name]
         key = PROPERTY_CONFIG[property_name]["coolprop_key"]
         cp_values: list[float] = []
@@ -675,11 +695,12 @@ def plot_critical_profile(config: ValidationConfig, output_dir: Path) -> None:
         ax.set_title(property_name)
         ax.grid(True, alpha=0.3)
 
-    for ax in axes[-1]:
-        ax.set_xlabel("Temperature / K")
-    for ax in axes[:, 0]:
-        ax.set_ylabel("Property value")
-    axes[0, 0].legend()
+    for index, ax in enumerate(axes[:len(properties)]):
+        if index // ncols == nrows - 1:
+            ax.set_xlabel("Temperature / K")
+        if index % ncols == 0:
+            ax.set_ylabel("Property value")
+    axes[0].legend()
     fig.suptitle(f"Critical-region profile at P = {pressure_pa / 1.0e6:.3f} MPa")
     fig.tight_layout()
     fig.savefig(output_dir / "critical_region_profile.png", dpi=300)

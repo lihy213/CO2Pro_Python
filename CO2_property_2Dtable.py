@@ -60,6 +60,7 @@ PROPERTY_FILES = {
     "viscosity": "co2_viscosity",
     "cp": "co2_cp",
     "conductivity": "co2_conductivity",
+    "sound_speed": "co2_sound_speed",
     "phase": "co2_phase",
 }
 
@@ -163,6 +164,7 @@ def calc_row(args: tuple[int, float, list[float], str]) -> tuple[int, float, dic
             viscosity = PropsSI("V", "T", temperature, "P", pressure, fluid)
             cp = PropsSI("C", "T", temperature, "P", pressure, fluid)
             conductivity = PropsSI("L", "T", temperature, "P", pressure, fluid)
+            sound_speed = PropsSI("A", "T", temperature, "P", pressure, fluid)
         except Exception as exc:  # CoolProp raises backend-specific exceptions.
             errors.append(f"Error at P={pressure} Pa, T={temperature} K: {exc}")
             phase = "invalid"
@@ -170,11 +172,13 @@ def calc_row(args: tuple[int, float, list[float], str]) -> tuple[int, float, dic
             viscosity = math.nan
             cp = math.nan
             conductivity = math.nan
+            sound_speed = math.nan
 
         row_data["density"].append(density)
         row_data["viscosity"].append(viscosity)
         row_data["cp"].append(cp)
         row_data["conductivity"].append(conductivity)
+        row_data["sound_speed"].append(sound_speed)
         row_data["phase"].append(phase)
 
     return row_index, pressure, row_data, errors

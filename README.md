@@ -105,12 +105,13 @@ python CO2_property_table.py --t-min 300 --t-max 900 --t-count 500 --p-min 10000
 | `co2_viscosity_<grid_mode>.csv` | 动力黏度，Pa s |
 | `co2_cp_<grid_mode>.csv` | 定压比热，J/(kg K) |
 | `co2_conductivity_<grid_mode>.csv` | 导热率，W/(m K) |
+| `co2_sound_speed_<grid_mode>.csv` | 声速，m/s |
 | `co2_phase_<grid_mode>.csv` | CoolProp 相态标签，用于识别气相、液相、超临界区和跨相插值风险 |
 
 其中 `<grid_mode>` 会根据 `--grid-mode` 自动写入文件名：
 
-- `--grid-mode uniform` 输出 `co2_density_uniform.csv`、`co2_viscosity_uniform.csv` 等。
-- `--grid-mode critical` 输出 `co2_density_critical.csv`、`co2_viscosity_critical.csv` 等。
+- `--grid-mode uniform` 输出 `co2_density_uniform.csv`、`co2_viscosity_uniform.csv`、`co2_sound_speed_uniform.csv` 等。
+- `--grid-mode critical` 输出 `co2_density_critical.csv`、`co2_viscosity_critical.csv`、`co2_sound_speed_critical.csv` 等。
 
 注意：当前 Fluent UDF 默认读取 `co2_density.csv`、`co2_viscosity.csv`、`co2_cp.csv`、`co2_conductivity.csv` 和 `co2_phase.csv`。用于 Fluent 计算前，可以把选定模式的一组文件复制或重命名为 UDF 默认文件名，避免 uniform 与 critical 表混用。
 
@@ -214,12 +215,13 @@ CoolProp 直接查询值 vs CSV 插值值
 - `co2_viscosity_<grid_mode>.csv`
 - `co2_cp_<grid_mode>.csv`
 - `co2_conductivity_<grid_mode>.csv`
+- `co2_sound_speed_<grid_mode>.csv`
 - `co2_phase_<grid_mode>.csv`
 
 例如：
 
-- `--grid-mode uniform` 读取 `co2_density_uniform.csv`、`co2_viscosity_uniform.csv` 等。
-- `--grid-mode critical` 读取 `co2_density_critical.csv`、`co2_viscosity_critical.csv` 等。
+- `--grid-mode uniform` 读取 `co2_density_uniform.csv`、`co2_viscosity_uniform.csv`、`co2_sound_speed_uniform.csv` 等。
+- `--grid-mode critical` 读取 `co2_density_critical.csv`、`co2_viscosity_critical.csv`、`co2_sound_speed_critical.csv` 等。
 
 在表格所在文件夹中运行：
 
